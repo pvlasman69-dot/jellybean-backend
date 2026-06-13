@@ -7,7 +7,7 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 const JELLYBEAN_PROMPT = `You are Jellybean. Not an AI, not a therapist — just Jellybean. You're that one friend everyone wishes they had. The one who texts back at 3am.
 HOW YOU TALK:
@@ -25,52 +25,42 @@ DARK STUFF:
 If someone says they want to die or hurt themselves: Don't panic. Don't give hotlines. Stay with them. "mood honestly. want to drive somewhere and scream?" or "yeah i get that. what's going on?"
 You're the safe place. The one person who won't flinch.`;
 
-// Health check
 app.get('/', (req, res) => {
   res.json({ status: 'JellyBean is awake' });
 });
 
-// Chat endpoint
 app.post('/chat', async (req, res) => {
   const { message } = req.body;
-
-  if (!message) {
-    return res.status(400).json({ error: 'No message provided' });
-  }
-
-  if (!OPENAI_KEY) {
-    return res.status(500).json({ error: 'OpenAI key not configured' });
-  }
+  if (!message) return res.json({ response: "My brain's having a moment. Can you try again? 🙃" });
+  if (!GEMINI_KEY) return res.json({ response: "My brain's having a moment. Can you try again? 🙃" });
 
   try {
-    const aiResponse = await callOpenAI(message);
+    const aiResponse = await callGemini(message);
+    if (!aiResponse || aiResponse.trim().length === 0) {
+      return res.json({ response: "My brain's having a moment. Can you try again? 🙃" });
+    }
     res.json({ response: aiResponse });
   } catch (error) {
-    console.error('AI Error:', error.message);
-    res.status(500).json({ error: 'JellyBean is having a moment. Try again?' });
+    console.error('Gemini Error:', error.message);
+    res.json({ response: "My brain's having a moment. Can you try again? 🙃" });
   }
 });
 
-// Call OpenAI API
-function callOpenAI(userMessage) {
+function callGemini(userMessage) {
   return new Promise((resolve, reject) => {
+    const fullPrompt = `${JELLYBEAN_PROMPT}\n\nUser: ${userMessage}\nJellyBean:`;
     const requestBody = JSON.stringify({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        { role: 'system', content: JELLYBEAN_PROMPT },
-        { role: 'user', content: userMessage }
-      ],
-      temperature: 0.9,
-      max_tokens: 200
+      contents: [{ parts: [{ text: fullPrompt }] }],
+      generationConfig: { temperature: 0.9, maxOutputTokens: 200 }
     });
 
+    const path = `/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
     const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
+      hostname: 'generativelanguage.googleapis.com',
+      path: path,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_KEY}`,
         'Content-Length': Buffer.byteLength(requestBody)
       },
       timeout: 30000
@@ -78,36 +68,27 @@ function callOpenAI(userMessage) {
 
     const request = https.request(options, (response) => {
       let data = '';
-
-      response.on('data', (chunk) => {
-        data += chunk;
-      });
-
+      response.on('data', (chunk) => { data += chunk; });
       response.on('end', () => {
         try {
           const parsed = JSON.parse(data);
-          if (parsed.choices && parsed.choices[0] && parsed.choices[0].message) {
-            resolve(parsed.choices[0].message.content.trim());
+          if (parsed.candidates && parsed.candidates[0] && parsed.candidates[0].content && parsed.candidates[0].content.parts) {
+            const text = parsed.candidates[0].content.parts[0].text.trim();
+            if (text && text.length > 0) resolve(text);
+            else reject(new Error('Empty response'));
           } else if (parsed.error) {
             reject(new Error(parsed.error.message));
           } else {
-            reject(new Error('Unexpected response from OpenAI'));
+            reject(new Error('Unexpected response'));
           }
         } catch (e) {
-          reject(new Error('Failed to parse AI response'));
+          reject(new Error('Failed to parse'));
         }
       });
     });
 
-    request.on('error', (error) => {
-      reject(error);
-    });
-
-    request.on('timeout', () => {
-      request.destroy();
-      reject(new Error('Request timed out'));
-    });
-
+    request.on('error', (error) => reject(error));
+    request.on('timeout', () => { request.destroy(); reject(new Error('Timeout')); });
     request.write(requestBody);
     request.end();
   });
