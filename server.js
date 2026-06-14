@@ -54,7 +54,7 @@ function callGemini(userMessage) {
       generationConfig: { temperature: 0.9, maxOutputTokens: 200 }
     });
 
-    const path = `/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_KEY}`;
+    const path = `/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
     const options = {
       hostname: 'generativelanguage.googleapis.com',
       path: path,
